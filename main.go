@@ -135,8 +135,14 @@ func getTestRuns(client *Client, id types.PrefixUUID, args []string) error {
 	}
 	count := 0
 	for foundRun.InProgress() {
+		dur := time.Since(foundRun.CreatedAt)
+		if dur > time.Minute {
+			dur = dur.Round(time.Second)
+		} else {
+			dur = dur.Round(10 * time.Millisecond)
+		}
 		if count%5 == 0 {
-			fmt.Printf("status is %q, running for %s, sleeping...\n", foundRun.Status, time.Since(foundRun.CreatedAt).Round(time.Millisecond))
+			fmt.Printf("status is %q, running for %s, sleeping...\n", foundRun.Status, dur)
 		}
 		count++
 		time.Sleep(2 * time.Second)
