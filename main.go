@@ -127,8 +127,12 @@ func getTestRuns(client *Client, id types.PrefixUUID) error {
 	if foundRun == nil {
 		return fmt.Errorf("Could not find test run for commit %s\n", tip[:8])
 	}
+	count := 0
 	for foundRun.InProgress() {
-		os.Setenv("DEBUG_HTTP_TRAFFIC", "true")
+		if count%5 == 0 {
+			fmt.Printf("status is %q, sleeping...\n", foundRun.Status)
+		}
+		count++
 		time.Sleep(2 * time.Second)
 		req, err := client.NewRequest("GET", "/test-runs/"+foundRun.ID.String(), nil)
 		if err != nil {
