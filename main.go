@@ -1,11 +1,15 @@
+// The heroku-ci binary interacts with Heroku CI.
 package main
 
 import (
+	"context"
+	"flag"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"time"
 
@@ -15,6 +19,8 @@ import (
 	"github.com/kevinburke/rest"
 	"github.com/knq/ini"
 )
+
+const Version = "0.1"
 
 type Client struct {
 	*rest.Client
@@ -91,8 +97,8 @@ func getMinTipLength(remoteTip string, localTip string) int {
 	return len(localTip)
 }
 
-func getTestRuns(client *Client, id types.PrefixUUID) error {
-	branch, err := getBranchFromArgs(os.Args[1:])
+func getTestRuns(client *Client, id types.PrefixUUID, args []string) error {
+	branch, err := getBranchFromArgs(args)
 	if err != nil {
 		return err
 	}
@@ -146,36 +152,80 @@ func getTestRuns(client *Client, id types.PrefixUUID) error {
 	return nil
 }
 
+const help = `The heroku-ci binary interacts with Heroku CI.
+
+Usage: 
+
+	heroku-ci command [arguments]
+
+The commands are:
+
+	version             Print the current version
+	wait                Wait for tests to finish on a branch.
+
+Use "travis help [command]" for more information about a command.
+`
+
+func usage() {
+	fmt.Fprintf(os.Stderr, help)
+	flag.PrintDefaults()
+}
+
 func main() {
-	homedir := os.UserHomeDir()
-	machine, err := netrc.FindMachine(filepath.Join(homedir, ".netrc"), "api.heroku.com")
-	if err != nil {
-		log.Fatal(err)
+	flag.Parse()
+	args := flag.Args()
+	if len(args) < 1 {
+		usage()
+		os.Exit(2)
 	}
-	client := &Client{
-		rest.NewClient(machine.Login, machine.Password, "https://api.heroku.com"),
-	}
-	client.Client.Client.Timeout = 0
-	pipelineName := getPipeline()
-	req, err := client.NewRequest("GET", "/pipelines", nil)
-	if err != nil {
-		log.Fatal(err)
-	}
-	pipelineBody := make([]*Pipeline, 0)
-	if err := client.Do(req, &pipelineBody); err != nil {
-		log.Fatal(err)
-	}
-	var ourPipeline *Pipeline
-	for i := range pipelineBody {
-		if pipelineBody[i].Name == pipelineName {
-			ourPipeline = pipelineBody[i]
-			break
+	ctx, cancel := context.WithCancel(context.Background())
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt)
+	go func() {
+		<-c
+		cancel()
+	}()
+	subargs := args[1:]
+	switch flag.Arg(0) {
+	case "wait":
+		homedir := os.UserHomeDir()
+		machine, err := netrc.FindMachine(filepath.Join(homedir, ".netrc"), "api.heroku.com")
+		if err != nil {
+			log.Fatal(err)
 		}
-	}
-	if ourPipeline == nil {
-		log.Fatalf("could not find pipeline named %q", pipelineName)
-	}
-	if err := getTestRuns(client, ourPipeline.ID); err != nil {
-		log.Fatal(err)
+		client := &Client{
+			rest.NewClient(machine.Login, machine.Password, "https://api.heroku.com"),
+		}
+		client.Client.Client.Timeout = 0
+		pipelineName := getPipeline()
+		req, err := client.NewRequest("GET", "/pipelines", nil)
+		if err != nil {
+			log.Fatal(err)
+		}
+		req = req.WithContext(ctx)
+		pipelineBody := make([]*Pipeline, 0)
+		if err := client.Do(req, &pipelineBody); err != nil {
+			log.Fatal(err)
+		}
+		var ourPipeline *Pipeline
+		for i := range pipelineBody {
+			if pipelineBody[i].Name == pipelineName {
+				ourPipeline = pipelineBody[i]
+				break
+			}
+		}
+		if ourPipeline == nil {
+			log.Fatalf("could not find pipeline named %q", pipelineName)
+		}
+		if err := getTestRuns(client, ourPipeline.ID, subargs); err != nil {
+			log.Fatal(err)
+		}
+	case "version":
+		fmt.Fprintf(os.Stderr, "heroku-ci version %s\n", Version)
+		os.Exit(1)
+	default:
+		fmt.Fprintf(os.Stderr, "heroku-ci: unknown command %q\n\n", flag.Arg(0))
+		usage()
+		os.Exit(2)
 	}
 }
