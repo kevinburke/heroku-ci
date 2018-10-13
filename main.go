@@ -97,7 +97,7 @@ func getMinTipLength(remoteTip string, localTip string) int {
 	return len(localTip)
 }
 
-func getTestRuns(client *Client, id types.PrefixUUID, args []string) error {
+func getTestRuns(ctx context.Context, client *Client, id types.PrefixUUID, args []string) error {
 	branch, err := getBranchFromArgs(args)
 	if err != nil {
 		return err
@@ -115,6 +115,7 @@ func getTestRuns(client *Client, id types.PrefixUUID, args []string) error {
 	if err != nil {
 		return err
 	}
+	req = req.WithContext(ctx)
 	runs := make([]*TestRun, 0)
 	if err := client.Do(req, &runs); err != nil {
 		return err
@@ -150,11 +151,18 @@ func getTestRuns(client *Client, id types.PrefixUUID, args []string) error {
 		if err != nil {
 			return err
 		}
+		req = req.WithContext(ctx)
 		if err := client.Do(req, &foundRun); err != nil {
 			return err
 		}
 	}
-	fmt.Printf("Test run %q completed with status %s! Exiting.\n", foundRun.ID.String()[:8], foundRun.Status)
+	dur := foundRun.UpdatedAt.Sub(foundRun.CreatedAt)
+	if dur > time.Minute {
+		dur = dur.Round(time.Second)
+	} else {
+		dur = dur.Round(10 * time.Millisecond)
+	}
+	fmt.Printf("Test run %q completed after %s with status %s! Exiting.\n", foundRun.ID.String()[:8], dur, foundRun.Status)
 	return nil
 }
 
@@ -223,7 +231,7 @@ func main() {
 		if ourPipeline == nil {
 			log.Fatalf("could not find pipeline named %q", pipelineName)
 		}
-		if err := getTestRuns(client, ourPipeline.ID, subargs); err != nil {
+		if err := getTestRuns(ctx, client, ourPipeline.ID, subargs); err != nil {
 			log.Fatal(err)
 		}
 	case "version":
