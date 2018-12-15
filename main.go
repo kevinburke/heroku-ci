@@ -202,7 +202,10 @@ func main() {
 	subargs := args[1:]
 	switch flag.Arg(0) {
 	case "wait":
-		homedir := os.UserHomeDir()
+		homedir, err := os.UserHomeDir()
+		if err != nil {
+			log.Fatal(err)
+		}
 		machine, err := netrc.FindMachine(filepath.Join(homedir, ".netrc"), "api.heroku.com")
 		if err != nil {
 			log.Fatal(err)
